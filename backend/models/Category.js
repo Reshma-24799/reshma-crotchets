@@ -19,7 +19,8 @@ const categorySchema = new mongoose.Schema({
   },
   image: {
     public_id: String,
-    url: String
+    url: String,
+    alt: String
   },
   isActive: {
     type: Boolean,
@@ -28,10 +29,24 @@ const categorySchema = new mongoose.Schema({
   sortOrder: {
     type: Number,
     default: 0
-  }
+  },
+  seo: {
+    metaTitle: String,
+    metaDescription: String,
+    keywords: [String],
+  },
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
 });
+
+// Virtual for subcategories
+categorySchema.virtual("subcategories", {
+  ref: "Category",
+  localField: "_id",
+  foreignField: "parent",
+})
 
 // Generate slug before saving
 categorySchema.pre('save', function(next) {
@@ -44,5 +59,10 @@ categorySchema.pre('save', function(next) {
   }
   next();
 });
+
+// Index for efficient queries
+categorySchema.index({ slug: 1 })
+categorySchema.index({ parent: 1, isActive: 1 })
+categorySchema.index({ sortOrder: 1 })
 
 export default mongoose.model('Category', categorySchema);

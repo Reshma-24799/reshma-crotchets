@@ -1,55 +1,46 @@
 import jwt from 'jsonwebtoken';
-import asyncHandler from 'express-async-handler';
 import User from '../models/User.js';
 
 // Protect routes - verify JWT token
-export const protect = asyncHandler(async (req, res, next) => {
-  let token;
-
-  // Check for token in headers
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      // Get token from header
-      token = req.headers.authorization.split(' ')[1];
-
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Get user from token (exclude password)
-      req.user = await User.findById(decoded.id).select('-password');
-
-      // Check if user still exists
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          message: 'User no longer exists'
-        });
+export const protect = async(async (req, res, next) => {
+  try{
+      let token;
+      if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+          token = req.headers.authorization.split(' ')[1];
+      } else if (req.cookies.token) {
+          token = req.cookies.token;
       }
-
-      // Check if user changed password after token was issued
-      if (req.user.changedPasswordAfter(decoded.iat)) {
-        return res.status(401).json({
-          success: false,
-          message: 'User recently changed password. Please log in again'
-        });
+      if (!token) {
+          return res.status(401).json({
+              success: false,
+              message: 'Not authorized, no token'
+          });
       }
-
-      next();
-    } catch (error) {
-      console.error('Token verification error:', error);
-      return res.status(401).json({
-        success: false,
-        message: 'Not authorized, token failed'
-      });
-    }
-  }
-
-  if (!token) {
-    return res.status(401).json({
+      try{
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          const user = await User.findById(decoded.id).select('-password');
+          if (!user) {
+              return res.status(401).json({
+                  success: false,
+                  message: 'User not found'
+              });
+          }
+          req.user = user;
+          next();
+      } catch (error) {
+          return res.status(401).json({
+              success: false,
+              message: 'Not authorized, token failed'
+          });
+      }
+  } catch(err){
+    console.error("Auth middleware error:", error);
+    res.status(500).json({
       success: false,
-      message: 'Not authorized, no token'
+      message: "Server error in authentication",
     });
   }
+
 });
 
 // Admin access middleware
@@ -65,19 +56,32 @@ export const admin = (req, res, next) => {
 };
 
 // Optional authentication - doesn't fail if no token
-export const optionalAuth = asyncHandler(async (req, res, next) => {
-  let token;
+export const optionalAuth = async (req, res, next) => {
+  try {
+    let token
 
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select('-password');
-    } catch (error) {
-      // Continue without user if token is invalid
-      req.user = null;
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+      token = req.headers.authorization.split(" ")[1]
+    } else if (req.cookies.token) {
+      token = req.cookies.token
     }
-  }
 
-  next();
-});
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET)
+        const user = await User.findById(decoded.id).select("-password")
+        if (user && !user.isLocked) {
+          req.user = user
+        }
+      } catch (error) {
+        // Token invalid, but continue without user
+        console.log("Optional auth: Invalid token")
+      }
+    }
+
+    next()
+  } catch (error) {
+    console.error("Optional auth middleware error:", error)
+    next()
+  }
+}

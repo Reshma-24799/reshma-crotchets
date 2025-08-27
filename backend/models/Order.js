@@ -1,5 +1,42 @@
 import mongoose from 'mongoose';
 
+const orderItemSchema = new mongoose.Schema({
+  product: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Product",
+    required: true,
+  },
+  name: {
+    type: String,
+    required: true,
+  },
+  image: {
+    type: String,
+    required: true,
+  },
+  price: {
+    type: Number,
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  selectedColor: {
+    name: String,
+    hexCode: String,
+  },
+  selectedSize: {
+    name: String,
+    dimensions: String,
+  },
+  customization: {
+    message: String,
+    instructions: String,
+  },
+})
+
 const orderSchema = new mongoose.Schema({
   orderNumber: {
     type: String,
@@ -11,141 +48,120 @@ const orderSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  items: [{
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-      required: true
-    },
-    name: {
-      type: String,
-      required: true
-    },
-    image: {
-      type: String,
-      required: true
-    },
-    price: {
-      type: Number,
-      required: true
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: [1, 'Quantity must be at least 1']
-    },
-    selectedVariants: [{
-      name: String,
-      value: String,
-      additionalPrice: {
-        type: Number,
-        default: 0
-      }
-    }],
-    customization: {
-      note: String,
-      additionalPrice: {
-        type: Number,
-        default: 0
-      }
-    }
-  }],
+  orderItems: [orderItemSchema],
   shippingAddress: {
-    name: {
-      type: String,
-      required: true
-    },
-    phone: {
-      type: String,
-      required: true
-    },
-    address: {
-      type: String,
-      required: true
-    },
-    city: {
-      type: String,
-      required: true
-    },
-    state: {
-      type: String,
-      required: true
-    },
-    country: {
-      type: String,
-      required: true,
-      default: 'Poland'
-    },
-    postalCode: {
-      type: String,
-      required: true
-    }
+    firstName: { type: String, required: true },
+    lastName: { type: String, required: true },
+    street: { type: String, required: true },
+    city: { type: String, required: true },
+    state: { type: String, required: true },
+    postalCode: { type: String, required: true },
+    country: { type: String, required: true, default: "Poland" },
+    phone: { type: String, required: true },
   },
-  paymentInfo: {
+  billingAddress: {
+    firstName: { type: String, required: true },
+    lastName: { type: String, required: true },
+    street: { type: String, required: true },
+    city: { type: String, required: true },
+    state: { type: String, required: true },
+    postalCode: { type: String, required: true },
+    country: { type: String, required: true, default: "Poland" },
+    phone: { type: String, required: true },
+  },
+  paymentMethod: {
+    type: String,
+    required: true,
     method: {
       type: String,
-      enum: ['card', 'upi', 'blik', 'netbanking', 'wallet'],
+      enum: ['card', 'upi', 'blik', 'netbanking', 'stripe'],
       required: true
     },
-    transactionId: String,
-    paidAt: Date
   },
-  pricing: {
-    itemsPrice: {
-      type: Number,
-      required: true
+  paymentResult: {
+      id: String,
+      status: String,
+      update_time: String,
+      email_address: String,
     },
-    shippingPrice: {
-      type: Number,
-      required: true,
-      default: 0
-    },
-    taxPrice: {
-      type: Number,
-      required: true,
-      default: 0
-    },
-    totalPrice: {
-      type: Number,
-      required: true
-    }
+  itemsPrice: {
+    type: Number,
+    required: true,
+    default: 0.0,
   },
-  orderStatus: {
+  taxPrice: {
+    type: Number,
+    required: true,
+    default: 0.0,
+  },
+  shippingPrice: {
+    type: Number,
+    required: true,
+    default: 0.0,
+  },
+  totalPrice: {
+    type: Number,
+    required: true,
+    default: 0.0,
+  },
+  currency: {
     type: String,
-    enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'],
-    default: 'pending'
+    default: "PLN",
   },
-  paymentStatus: {
-    type: String,
-    enum: ['pending', 'paid', 'failed', 'refunded'],
-    default: 'pending'
-  },
-  tracking: {
-    carrier: String,
-    trackingNumber: String,
-    trackingUrl: String
-  },
-  statusHistory: [{
-    status: String,
-    note: String,
-    updatedAt: {
+  isPaid: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    paidAt: {
       type: Date,
-      default: Date.now
-    }
-  }],
-  deliveredAt: Date,
-  notes: String
+    },
+    isDelivered: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    deliveredAt: {
+      type: Date,
+    },
+    status: {
+      type: String,
+      required: true,
+      enum: ["pending", "processing", "shipped", "delivered", "cancelled", "refunded"],
+      default: "pending",
+    },
+    trackingNumber: {
+      type: String,
+    },
+    estimatedDelivery: {
+      type: Date,
+    },
+    notes: {
+      type: String,
+      maxlength: 500,
+    },
+    refund: {
+      amount: Number,
+      reason: String,
+      status: {
+        type: String,
+        enum: ["requested", "approved", "processed", "rejected"],
+      },
+      requestedAt: Date,
+      processedAt: Date,
+    },
 }, {
   timestamps: true
 });
 
-// Generate order number before saving
-orderSchema.pre('save', async function(next) {
-  if (!this.orderNumber) {
-    const count = await mongoose.model('Order').countDocuments();
-    this.orderNumber = `RC${String(count + 1).padStart(6, '0')}`;
-  }
-  next();
+// Virtual for order number
+orderSchema.virtual("orderNumber").get(function () {
+  return `RC-${this._id.toString().slice(-8).toUpperCase()}`
 });
+
+// Index for user orders
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ trackingNumber: 1 });
 
 export default mongoose.model('Order', orderSchema);

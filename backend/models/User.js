@@ -2,13 +2,70 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
-const userSchema = new mongoose.Schema({
-  name: {
+const addressSchema = new mongoose.Schema({
+  type: {
     type: String,
-    required: [true, 'Please provide a name'],
-    trim: true,
-    maxLength: [50, 'Name cannot exceed 50 characters']
+    enum: ["home", "work", "other"],
+    default: "home",
   },
+  firstName: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  lastName: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  street: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  city: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  state: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  postalCode: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  country: {
+    type: String,
+    required: true,
+    default: "Poland",
+  },
+  phone: {
+    type: String,
+    trim: true,
+  },
+  isDefault: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+const userSchema = new mongoose.Schema({
+  firstName: {
+    type: String,
+    required: [true, "First name is required"],
+    trim: true,
+    maxlength: [50, "First name cannot exceed 50 characters"],
+  },
+  lastName: {
+    type: String,
+    required: [true, "Last name is required"],
+    trim: true,
+    maxlength: [50, "Last name cannot exceed 50 characters"],
+    },
   email: {
     type: String,
     required: [true, 'Please provide an email'],
@@ -30,67 +87,66 @@ const userSchema = new mongoose.Schema({
     enum: ['customer', 'admin'],
     default: 'customer'
   },
+  dateOfBirth: {
+    type: Date,
+  },
+  gender: {
+    type: String,
+    enum: ["male", "female", "other", "prefer-not-to-say"],
+  },
   avatar: {
     public_id: String,
     url: String
   },
+  isVerified: {
+    type: Boolean,
+    default: false,
+  },
   phone: {
     type: String,
+    match: [/^\+?[\d\s-()]+$/, "Please enter a valid phone number"],
     trim: true
   },
-  addresses: [{
-    name: {
-      type: String,
-      required: true
-    },
-    phone: {
-      type: String,
-      required: true
-    },
-    address: {
-      type: String,
-      required: true
-    },
-    city: {
-      type: String,
-      required: true
-    },
-    state: {
-      type: String,
-      required: true
-    },
-    country: {
-      type: String,
-      required: true,
-      default: 'Poland'
-    },
-    postalCode: {
-      type: String,
-      required: true
-    },
-    isDefault: {
-      type: Boolean,
-      default: false
-    }
-  }],
+  addresses: [addressSchema],
   wishlist: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
   }],
-  passwordChangedAt: {
+  preferences: {
+    newsletter: {
+      type: Boolean,
+      default: true,
+    },
+    smsNotifications: {
+      type: Boolean,
+      default: false,
+    },
+    currency: {
+      type: String,
+      default: "PLN",
+    },
+    language: {
+      type: String,
+      default: "en",
+    },
+  },
+  lastLogin: {
     type: Date,
-    default: Date.now
+    
   },
   resetPasswordToken: String,
   resetPasswordExpire: Date,
   emailVerificationToken: String,
-  isEmailVerified: {
-    type: Boolean,
-    default: false
-  }
+  emailVerificationExpire: Date,
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
 });
+
+userSchema.virtual("fullName").get(function () {
+  return `${this.firstName} ${this.lastName}`
+})
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
@@ -99,9 +155,6 @@ userSchema.pre('save', async function(next) {
   }
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
-  
-  // Track when password was changed
-  this.passwordChangedAt = Date.now() - 1000; // Subtract 1 second to ensure JWT is issued after
   next();
 });
 
@@ -110,75 +163,13 @@ userSchema.methods.comparePassword = async function(enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Generate password reset token
-userSchema.methods.getResetPasswordToken = function() {
-  const resetToken = crypto.randomBytes(20).toString('hex');
-  this.resetPasswordToken = crypto
-    .createHash('sha256')
-    .update(resetToken)
-    .digest('hex');
-  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
-  return resetToken;
-};
+// Index for email lookup
+userSchema.index({ email: 1 })
+userSchema.index({ resetPasswordToken: 1 })
+userSchema.index({ emailVerificationToken: 1 })
 
-// Generate email verification token
-userSchema.methods.getEmailVerificationToken = function() {
-  const verificationToken = crypto.randomBytes(20).toString('hex');
-  this.emailVerificationToken = crypto
-    .createHash('sha256')
-    .update(verificationToken)
-    .digest('hex');
-  return verificationToken;
-};
 
-// Check if password was changed after JWT was issued
-userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
-  if (this.passwordChangedAt) {
-    const changedTimestamp = parseInt(
-      this.passwordChangedAt.getTime() / 1000,
-      10
-    );
-    return JWTTimestamp < changedTimestamp;
-  }
-  return false;
-};
 
-// Add address method
-userSchema.methods.addAddress = function(addressData) {
-  // If this is set as default, unset others
-  if (addressData.isDefault) {
-    this.addresses.forEach(addr => addr.isDefault = false);
-  }
-  this.addresses.push(addressData);
-  return this.save();
-};
 
-// Update address method
-userSchema.methods.updateAddress = function(addressId, updateData) {
-  const address = this.addresses.id(addressId);
-  if (!address) {
-    throw new Error('Address not found');
-  }
-  // If setting as default, unset others
-  if (updateData.isDefault) {
-    this.addresses.forEach(addr => addr.isDefault = false);
-  }
-  Object.assign(address, updateData);
-  return this.save();
-};
-
-// Ensure only one default address
-userSchema.pre('save', function(next) {
-  if (this.addresses && this.addresses.length > 0) {
-    const defaultAddresses = this.addresses.filter(addr => addr.isDefault);
-    if (defaultAddresses.length > 1) {
-      // Keep only the last one as default
-      this.addresses.forEach((addr, index) => {
-        addr.isDefault = index === this.addresses.length - 1 && addr.isDefault;
-      });
-    }
-  }
-  next();
-});
 
 export default mongoose.model('User', userSchema);

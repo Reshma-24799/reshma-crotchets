@@ -7,11 +7,6 @@ const productSchema = new mongoose.Schema({
     trim: true,
     maxLength: [100, 'Product name cannot exceed 100 characters']
   },
-  slug: {
-    type: String,
-    unique: true,
-    lowercase: true
-  },
   description: {
     type: String,
     required: [true, 'Product description is required'],
@@ -26,14 +21,24 @@ const productSchema = new mongoose.Schema({
     required: [true, 'Product price is required'],
     min: [0, 'Price cannot be negative']
   },
-  comparePrice: {
-    type: Number,
-    min: [0, 'Compare price cannot be negative']
+  discountPrice: {
+      type: Number,
+      min: [0, "Discount price cannot be negative"],
+      validate: {
+        validator: function (value) {
+          return !value || value < this.price
+        },
+        message: "Discount price must be less than regular price",
+      },
   },
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
     required: [true, 'Product category is required']
+  },
+  subcategory: {
+    type: String,
+    trim: true,
   },
   images: [{
     public_id: {
@@ -46,120 +51,126 @@ const productSchema = new mongoose.Schema({
     },
     alt: String
   }],
-  variants: [{
-    name: {
-      type: String,
-      required: true // e.g., "Color", "Size"
-    },
-    options: [{
-      value: {
-        type: String,
-        required: true // e.g., "Red", "Large"
-      },
-      price: {
-        type: Number,
-        default: 0 // Additional price for this variant
-      },
+  colors: [ 
+    {
+      name: String,
+      hexCode: String,
       stock: {
         type: Number,
-        required: true,
-        min: [0, 'Stock cannot be negative'],
-        default: 0
+        min: 0,
+        default: 0,
       },
-      sku: String
-    }]
-  }],
+    },
+  ],
+  sizes: [
+  {
+    name: String,
+    dimensions: String,
+    stock: {
+      type: Number,
+        min: 0,
+        default: 0,
+      },
+    },
+  ],
+  materials: [
+    {
+      type: String,
+      trim: true,
+    },
+  ],
+  featured: {
+    type: Boolean,
+    default: false,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
   stock: {
     type: Number,
     required: [true, 'Stock quantity is required'],
     min: [0, 'Stock cannot be negative'],
     default: 0
   },
-  sku: {
-    type: String,
-    unique: true,
-    sparse: true
-  },
   dimensions: {
     length: Number,
     width: Number,
     height: Number
   },
-  materials: [String], // e.g., ["Cotton", "Wool"]
-  careInstructions: String,
-  tags: [String],
-  isActive: {
-    type: Boolean,
-    default: true
+  tags: [
+      {
+        type: String,
+        trim: true,
+        lowercase: true,
+      },
+  ],
+  numReviews: {
+    type: Number,
+    default: 0,
   },
-  isFeatured: {
-    type: Boolean,
-    default: false
+  avgRating: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5,
   },
-  ratings: {
-    average: {
-      type: Number,
-      default: 0,
-      min: [0, 'Rating cannot be less than 0'],
-      max: [5, 'Rating cannot be more than 5']
-    },
-    count: {
-      type: Number,
-      default: 0
-    }
+  ratingDistribution: {
+      1: { type: Number, default: 0 },
+      2: { type: Number, default: 0 },
+      3: { type: Number, default: 0 },
+      4: { type: Number, default: 0 },
+      5: { type: Number, default: 0 },
   },
-  seoTitle: String,
-  seoDescription: String,
-  customizationOptions: {
-    isCustomizable: {
-      type: Boolean,
-      default: false
-    },
-    customizationNote: String,
-    additionalPrice: {
-      type: Number,
-      default: 0
-    }
-  }
+  sold: {
+    type: Number,
+    default: 0,
+  },
+  seo: {
+    metaTitle: String,
+    metaDescription: String,
+    keywords: [String],
+  },
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
 });
 
-// Generate slug before saving
-productSchema.pre('save', function(next) {
-  if (this.isModified('name')) {
-    this.slug = this.name
-      .toLowerCase()
-      .replace(/[^a-zA-Z0-9]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
+// Virtual for discount percentage
+productSchema.virtual("discountPercentage").get(function () {
+  if (this.discountPrice && this.price > this.discountPrice) {
+    return Math.round(((this.price - this.discountPrice) / this.price) * 100);
   }
-  next();
+  return 0;
 });
 
-// Update ratings when reviews change
-productSchema.methods.updateRatings = async function() {
-  const Review = mongoose.model('Review');
-  const stats = await Review.aggregate([
-    { $match: { product: this._id } },
-    {
-      $group: {
-        _id: null,
-        averageRating: { $avg: '$rating' },
-        totalReviews: { $sum: 1 }
-      }
-    }
-  ]);
+// Virtual for effective price
+productSchema.virtual("effectivePrice").get(function () {
+  return this.discountPrice || this.price;
+});
 
-  if (stats.length > 0) {
-    this.ratings.average = Math.round(stats[0].averageRating * 10) / 10;
-    this.ratings.count = stats[0].totalReviews;
-  } else {
-    this.ratings.average = 0;
-    this.ratings.count = 0;
-  }
+productSchema.virtual("reviews", {
+  ref: "Review",
+  localField: "_id",
+  foreignField: "product",
+  match: { status: "approved" },
+});
 
-  await this.save();
-};
+// Index for search functionality
+productSchema.index({
+  name: "text",
+  description: "text",
+  tags: "text",
+});
+
+// Index for filtering
+productSchema.index({ category: 1, isActive: 1 });
+productSchema.index({ featured: 1, isActive: 1 });
+productSchema.index({ price: 1 });
+productSchema.index({ avgRating: -1 });
+productSchema.index({ createdAt: -1 });
+
+
 
 export default mongoose.model('Product', productSchema);
